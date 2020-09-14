@@ -51,7 +51,7 @@ def json_to_mask(img_path, vector_path, burn_val=1):
         [1], 
         layer, 
         options = ["ALL_TOUCHED=False", "ATTRIBUTE=Building_ID"], 
-        burn_values=[burn_val] #not working for some reason 
+        burn_values=[burn_val] #not working for some reason, workaround below 
     )
 
     shapemask_array = target_ds.ReadAsArray().astype('float32') #keeping same datatype as input scene because of merging during tile process
@@ -60,7 +60,7 @@ def json_to_mask(img_path, vector_path, burn_val=1):
     if len(shapemask_array.shape) == 2: 
         shapemask_array = np.expand_dims(shapemask_array, axis=0)
 
-    #temp solution to overcome gdal rasterize layer bug... ensure all binary values are 0,1
+    #temp solution to overcome gdal rasterize layer bug(?)... ensure all binary values are 0,1
     for band in range(shapemask_array.shape[0]): 
         shapemask_array[band][shapemask_array[band]>0] = 1.
 
@@ -161,11 +161,7 @@ def Xy_chipgen(X_img, y_img, wind_size=320, remove_bad_tiles=True, mask_zeros=Tr
             for y in range(0,X_img.shape[2],N)] 
     X_tiles = np.array(X_tiles)
 
-    # y_tiles = [padded[X_img.shape[0]:, x:x+M,y:y+N].transpose((1, 2, 0)).astype('byte') 
-    #         for x in range(0,X_img.shape[1],M) 
-    #         for y in range(0,X_img.shape[2],N)] 
-
-    y_tiles = [padded[X_img.shape[0]:, x:x+M,y:y+N].transpose((1, 2, 0))
+    y_tiles = [padded[X_img.shape[0]:, x:x+M,y:y+N].transpose((1, 2, 0)).astype('byte') 
             for x in range(0,X_img.shape[1],M) 
             for y in range(0,X_img.shape[2],N)] 
     
@@ -233,14 +229,13 @@ def sort_spacenet_images(X_train_opt_path, X_train_sar_path, y_train_path):
             _im_num = re.search('tile_(.*).geojson', j)
             _im_num = _im_num.group(1)
             for k in X_train_sar_ids:
-                im_num_ = re.search('tile_(.*).tif', i)
+                im_num_ = re.search('tile_(.*).tif', k)
                 im_num_ = im_num_.group(1)
                 if im_num == _im_num == im_num_: 
-                    #print(im_num, _im_num)
                     Xy_train_names.append([X_train_opt_path + os.sep + i, 
                                            X_train_sar_path + os.sep + k,
                                            y_train_path + os.sep + j])
-                break 
+                    break 
 
     print('{} Xy Matching Training images Found'.format(len(Xy_train_names)))
 
@@ -257,33 +252,47 @@ def tilestack_opt_and_sar():
     Xy_train_names = sort_spacenet_images(X_train_opt_path, X_train_sar_path, y_train_path)
 
     #pair optical with sar and make tiles 
-    X_train_opt = []
-    X_train_sar = []
+    X_train = []
+    y_train = []
 
     for i in Xy_train_names: 
-
+        
         img_opt = img_to_array(i[0], dtype='float32') / 2**11
         img_sar = img_to_array(i[1], dtype='float32') / 100
+
+        img_stacked = np.vstack((img_opt, img_sar)) #stacks along axis 0 (bands)
+        print(np.max(img_opt))
         y_mask = json_to_mask(i[0], i[2]) 
 
         #deal with black bars in imagery, gets bounds of valid data across all bands 
         idx_bounds = np.where(np.any(img_opt, axis=0).astype('byte') != 0)
 
         #clip to bounds 
-        img_opt_clip = img_opt[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
-        img_sar_clip = img_sar[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
+        # img_opt_clip = img_opt[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
+        # img_sar_clip = img_sar[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
+        img_stacked_clip = img_stacked[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
         y_mask_clip = y_mask[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
 
-        print(img_opt_clip.shape)
+        #split images into tiles, add padding 
+        _X_train_opt_sar, _y_train = Xy_chipgen(img_stacked_clip, y_mask_clip, wind_size=wind_size, mask_zeros=True)
 
-    #     #split images into tiles, add padding 
-    #     _X_train_opt, _X_train_sar = Xy_chipgen(img_opt_clip, img_sar_clip, wind_size=wind_size, mask_zeros=False)
+        X_train.append(_X_train_opt_sar)
+        y_train.append(_y_train)
 
-    #     X_train_opt.append(_X_train_opt)
-    #     X_train_sar.append(_X_train_sar)
-    
-    # X_train_opt = np.concatenate(X_train_opt)
-    # X_train_sar = np.concatenate(X_train_sar)
+        img_opt = None
+        img_sar = None
+        img_stacked = None
+        y_mask = None
+        img_stacked_clip = None
+        y_mask_clip = None
+        _X_train_opt_sar = None
+        _y_train = None
+
+    X_train = np.concatenate(X_train)
+    y_train = np.concatenate(y_train)
+
+    print(X_train.shape)
+    print(y_train.shape)
 
     # np.save('X_optical_samp.npy', X_train_opt)
     # np.save('X_sar_samp.npy', X_train_sar)
