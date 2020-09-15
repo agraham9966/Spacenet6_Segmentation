@@ -210,36 +210,16 @@ def img_to_array(input_file, dtype='uint16'):   ###reads multiband image as ndar
     
     return arr
 
+def get_image_list(): 
+    X_train_opt_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/PS-RGBNIR'
+    root_dir = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam'
+    bu = [x for x in os.listdir(X_train_opt_path) if x.endswith('.tif')]
 
-def sort_spacenet_images(X_train_opt_path, X_train_sar_path, y_train_path): 
+    X_opt_paths = [root_dir + os.sep + 'PS-RGBNIR/' + x for x in bu]
+    X_sar_paths = [root_dir + os.sep + 'SAR-Intensity/' + x.replace("PS-RGBNIR", "SAR-Intensity") for x in bu]
+    y_train_paths = [root_dir + os.sep + 'geojson_buildings/' + x.replace("PS-RGBNIR", "Buildings")[:-3] + 'geojson' for x in bu]
 
-    #example image name format from spacenet download: SN3_roads_train_AOI_3_Paris_MS_img6.tif 
-    #returns a list, where each row represents matching optical image path at element 0, sar at element 1, labels path at element2
-
-    X_train_opt_ids = os.listdir(X_train_opt_path)
-    X_train_sar_ids = os.listdir(X_train_sar_path)
-    y_train_ids = os.listdir(y_train_path)
-
-    #deal with uneven amount of training data and training labels - match up by image number
-    Xy_train_names = [] #X_train, y_train 
-    for i in X_train_opt_ids: 
-        im_num = re.search('tile_(.*).tif', i)
-        im_num = im_num.group(1)
-        for j in y_train_ids: 
-            _im_num = re.search('tile_(.*).geojson', j)
-            _im_num = _im_num.group(1)
-            for k in X_train_sar_ids:
-                im_num_ = re.search('tile_(.*).tif', k)
-                im_num_ = im_num_.group(1)
-                if im_num == _im_num == im_num_: 
-                    Xy_train_names.append([X_train_opt_path + os.sep + i, 
-                                           X_train_sar_path + os.sep + k,
-                                           y_train_path + os.sep + j])
-                    break 
-
-    print('{} Xy Matching Training images Found'.format(len(Xy_train_names)))
-
-    return Xy_train_names #list of image paths and their mask paths 
+    return zip(X_opt_paths, X_sar_paths, y_train_paths)
 
 def tilestack_opt_and_sar(): 
 
@@ -249,7 +229,8 @@ def tilestack_opt_and_sar():
     X_train_opt_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/PS-RGBNIR'
     X_train_sar_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/SAR-Intensity'
     y_train_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/geojson_buildings'
-    Xy_train_names = sort_spacenet_images(X_train_opt_path, X_train_sar_path, y_train_path)
+    
+    Xy_train_names = get_image_list()
 
     #pair optical with sar and make tiles 
     X_train = []
@@ -261,7 +242,6 @@ def tilestack_opt_and_sar():
         img_sar = img_to_array(i[1], dtype='float32') / 100
 
         img_stacked = np.vstack((img_opt, img_sar)) #stacks along axis 0 (bands)
-        print(np.max(img_opt))
         y_mask = json_to_mask(i[0], i[2]) 
 
         #deal with black bars in imagery, gets bounds of valid data across all bands 
@@ -301,4 +281,6 @@ def tilestack_opt_and_sar():
 
 
 if __name__ == '__main__': 
+    #x = get_image_list()
     tilestack_opt_and_sar()
+
