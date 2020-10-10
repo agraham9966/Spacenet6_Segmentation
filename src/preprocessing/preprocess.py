@@ -3,8 +3,12 @@ import sys, os
 import matplotlib.pyplot as plt 
 import gdal, ogr, osr 
 import osgeo.gdalnumeric as gdn
+import tensorflow as tf 
 import re 
+#import IPython.display as display
 
+#training data root 
+root_dir = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam'
 
 def json_to_mask(img_path, vector_path, burn_val=1): 
 
@@ -229,6 +233,7 @@ def tilestack_opt_and_sar():
     X_train_opt_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/PS-RGBNIR'
     X_train_sar_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/SAR-Intensity'
     y_train_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/geojson_buildings'
+
     
     Xy_train_names = get_image_list()
 
@@ -248,39 +253,35 @@ def tilestack_opt_and_sar():
         idx_bounds = np.where(np.any(img_opt, axis=0).astype('byte') != 0)
 
         #clip to bounds 
-        # img_opt_clip = img_opt[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
-        # img_sar_clip = img_sar[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
         img_stacked_clip = img_stacked[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
         y_mask_clip = y_mask[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
 
         #split images into tiles, add padding 
         _X_train_opt_sar, _y_train = Xy_chipgen(img_stacked_clip, y_mask_clip, wind_size=wind_size, mask_zeros=True)
 
-        X_train.append(_X_train_opt_sar)
-        y_train.append(_y_train)
+        X_save_path = root_dir + os.sep + 'processed/X_train'
+        y_save_path = root_dir + os.sep + 'processed/y_train'
 
-        img_opt = None
-        img_sar = None
-        img_stacked = None
-        y_mask = None
-        img_stacked_clip = None
-        y_mask_clip = None
-        _X_train_opt_sar = None
-        _y_train = None
+        if not os.path.exists(X_save_path): 
+            os.makedirs(X_save_path)
+        
+        if not os.path.exists(y_save_path): 
+            os.makedirs(y_save_path)
 
-    X_train = np.concatenate(X_train)
-    y_train = np.concatenate(y_train)
+        n_samples = 0
+        for tile in range(_X_train_opt_sar.shape[0]): 
+            n_samples+=1
 
-    print(X_train.shape)
-    print(y_train.shape)
+            print('Saving:', X_save_path + os.sep + f'{n_samples}_X_train_optsar_stack.npy')
+            print('Saving:', y_save_path + os.sep + f'{n_samples}_y_train_optsar_stack.npy')
+            np.save(X_save_path + os.sep + f'{n_samples}_X_train_optsar_stack.npy', _X_train_opt_sar[tile])
+            np.save(y_save_path + os.sep + f'{n_samples}_y_train_optsar_stack.npy', _y_train[tile])
 
-    # np.save('X_optical_samp.npy', X_train_opt)
-    # np.save('X_sar_samp.npy', X_train_sar)
+        print('Done.')
 
     return 
 
 
 if __name__ == '__main__': 
-    #x = get_image_list()
     tilestack_opt_and_sar()
 
