@@ -1,14 +1,14 @@
 import numpy as np 
-import sys, os 
+import sys, os, shutil
 import matplotlib.pyplot as plt 
 import gdal, ogr, osr 
 import osgeo.gdalnumeric as gdn
-import tensorflow as tf 
 import re 
+import random
 #import IPython.display as display
 
 #training data root 
-root_dir = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam'
+root_dir = 'D:\RD\RD-AI\spacenet6\AOI_11_Rotterdam'
 
 def json_to_mask(img_path, vector_path, burn_val=1): 
 
@@ -159,7 +159,7 @@ def Xy_chipgen(X_img, y_img, wind_size=320, remove_bad_tiles=True, mask_zeros=Tr
         wind_size=wind_size
     )
     
-    #shaped each tile as channels last... or figure out how to set channels first in tensorflow 
+    #shaped each tile as channels last... or set channels first in tensorflow 
     X_tiles = [padded[:X_img.shape[0], x:x+M,y:y+N].transpose((1, 2, 0))
             for x in range(0,X_img.shape[1],M) 
             for y in range(0,X_img.shape[2],N)] 
@@ -215,69 +215,91 @@ def img_to_array(input_file, dtype='uint16'):   ###reads multiband image as ndar
     return arr
 
 def get_image_list(): 
-    X_train_opt_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/PS-RGBNIR'
-    root_dir = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam'
+    X_train_opt_path = 'D:\RD\RD-AI\spacenet6\AOI_11_Rotterdam\PS-RGBNIR'
+    root_dir = 'D:\RD\RD-AI\spacenet6\AOI_11_Rotterdam'
     bu = [x for x in os.listdir(X_train_opt_path) if x.endswith('.tif')]
 
     X_opt_paths = [root_dir + os.sep + 'PS-RGBNIR/' + x for x in bu]
     X_sar_paths = [root_dir + os.sep + 'SAR-Intensity/' + x.replace("PS-RGBNIR", "SAR-Intensity") for x in bu]
     y_train_paths = [root_dir + os.sep + 'geojson_buildings/' + x.replace("PS-RGBNIR", "Buildings")[:-3] + 'geojson' for x in bu]
 
-    return zip(X_opt_paths, X_sar_paths, y_train_paths)
+    return list(map(list, zip(X_opt_paths, X_sar_paths, y_train_paths)))
 
 def tilestack_opt_and_sar(): 
 
-    #create one dataset which is optical and sar , no y_labels needed for GAN network 
     #create one dataset which is sar and y_labels 
     wind_size = 256 #size of chips for training 
-    X_train_opt_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/PS-RGBNIR'
-    X_train_sar_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/SAR-Intensity'
-    y_train_path = 'D:/project_data/spacenet6/SN6_buildings_AOI_11_Rotterdam_train_sample/AOI_11_Rotterdam/geojson_buildings'
-
     
     Xy_train_names = get_image_list()
+    random.seed(110)
+    random.shuffle(Xy_train_names)
+
+    # set aside 10% data for testing 
+    trainSet, testSet = Xy_train_names[0:int(0.9*len(Xy_train_names))], Xy_train_names[int(0.9*len(Xy_train_names)):]
+
+    #make test folder - move testing geotiffs to this folder 
+    test_dir_opt = root_dir + os.sep + 'test_dir/PS-RGBNIR'
+    test_dir_sar = root_dir + os.sep + 'test_dir/SAR'
+    test_dir_labels = root_dir + os.sep + 'test_dir/buildings'
+
+    if not os.path.exists(test_dir_opt): 
+        os.makedirs(test_dir_opt)  
+
+    if not os.path.exists(test_dir_sar): 
+        os.makedirs(test_dir_sar)  
+
+    if not os.path.exists(test_dir_labels): 
+        os.makedirs(test_dir_labels)  
+
+    for i in testSet: 
+        if os.path.exists(i[0]) and os.path.exists(i[1]): 
+            shutil.move(i[0], test_dir_opt)
+            shutil.move(i[1], test_dir_sar)
+            shutil.move(i[2], test_dir_labels)
+
+    print('Moved 90% test data to new folder')
+
+    # create directories to output preprocessed training chips 
+    X_save_path = root_dir + os.sep + 'processed/X_train'
+    y_save_path = root_dir + os.sep + 'processed/y_train'
+    
+    if not os.path.exists(X_save_path): 
+        os.makedirs(X_save_path)
+            
+    if not os.path.exists(y_save_path): 
+        os.makedirs(y_save_path)
 
     #pair optical with sar and make tiles 
     X_train = []
     y_train = []
-
-    for i in Xy_train_names: 
+    n_samples = 0
+    for i in trainSet: 
         
-        img_opt = img_to_array(i[0], dtype='float32') / 2**11
-        img_sar = img_to_array(i[1], dtype='float32') / 100
+        if os.path.exists(i[0]) and os.path.exists(i[1]): 
 
-        img_stacked = np.vstack((img_opt, img_sar)) #stacks along axis 0 (bands)
-        y_mask = json_to_mask(i[0], i[2]) 
-
-        #deal with black bars in imagery, gets bounds of valid data across all bands 
-        idx_bounds = np.where(np.any(img_opt, axis=0).astype('byte') != 0)
-
-        #clip to bounds 
-        img_stacked_clip = img_stacked[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
-        y_mask_clip = y_mask[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
-
-        #split images into tiles, add padding 
-        _X_train_opt_sar, _y_train = Xy_chipgen(img_stacked_clip, y_mask_clip, wind_size=wind_size, mask_zeros=True)
-
-        X_save_path = root_dir + os.sep + 'processed/X_train'
-        y_save_path = root_dir + os.sep + 'processed/y_train'
-
-        if not os.path.exists(X_save_path): 
-            os.makedirs(X_save_path)
-        
-        if not os.path.exists(y_save_path): 
-            os.makedirs(y_save_path)
-
-        n_samples = 0
-        for tile in range(_X_train_opt_sar.shape[0]): 
-            n_samples+=1
-
-            print('Saving:', X_save_path + os.sep + f'{n_samples}_X_train_optsar_stack.npy')
-            print('Saving:', y_save_path + os.sep + f'{n_samples}_y_train_optsar_stack.npy')
-            np.save(X_save_path + os.sep + f'{n_samples}_X_train_optsar_stack.npy', _X_train_opt_sar[tile])
-            np.save(y_save_path + os.sep + f'{n_samples}_y_train_optsar_stack.npy', _y_train[tile])
-
-        print('Done.')
+            img_opt = img_to_array(i[0], dtype='float32') / 2**11
+            img_sar = img_to_array(i[1], dtype='float32') / 100
+    
+            img_stacked = np.vstack((img_opt, img_sar)) #stacks along axis 0 (bands)
+            y_mask = json_to_mask(i[0], i[2]) 
+    
+            #deal with black bars in imagery, gets bounds of valid data across all bands 
+            idx_bounds = np.where(np.any(img_opt, axis=0).astype('byte') != 0)
+    
+            #clip to bounds 
+            img_stacked_clip = img_stacked[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
+            y_mask_clip = y_mask[:, idx_bounds[0].min(): idx_bounds[0].max() + 1, idx_bounds[1].min(): idx_bounds[1].max()+1]
+    
+            #split images into tiles, add padding 
+            _X_train_opt_sar, _y_train = Xy_chipgen(img_stacked_clip, y_mask_clip, wind_size=wind_size, mask_zeros=True)
+            
+            for tile in range(_X_train_opt_sar.shape[0]): 
+                n_samples+=1
+    
+                np.save(X_save_path + os.sep + f'{n_samples}_X_train_optsar_stack.npy', _X_train_opt_sar[tile])
+                np.save(y_save_path + os.sep + f'{n_samples}_y_train_optsar_stack.npy', _y_train[tile])
+    
+            print('Done.')
 
     return 
 
