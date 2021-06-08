@@ -1,5 +1,4 @@
-# Spacenet6_Segmentation
-Personal exploration of optical and sar fusion for spacenet 6 dataset 
+# Optical & SAR Fusion for Building Footprint Extraction using a U-Net Architecture 
 
 ** This is not an official entry into the spacenet 6 challenge - nor does it follow the guidelines of the challenge ** 
 
@@ -12,4 +11,10 @@ Dataset location (Amazon AWS): https://registry.opendata.aws/spacenet/
 
 
 ![Alt text](/figures/Detection_Rate_Plot-zoomed.png?raw=true "test")
+![Alt text](/figures/F1_Scores.png?raw=true "test")
 ![Alt text](/figures/Figure_1.jpg?raw=true "test")
+![Alt text](/figures/Figure_2.jpg?raw=true "test")
+![Alt text](/figures/Figure_3.jpg?raw=true "test")
+![Alt text](/figures/Figure_4.jpg?raw=true "test")
+![Alt text](/figures/Figure_5.jpg?raw=true "test")
+![Alt text](/figures/Figure_6.jpg?raw=true "test")
